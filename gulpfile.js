@@ -14,6 +14,7 @@ require('es6-promise').polyfill();
 
 // Include Gulp & tools we'll use
 var gulp = require('gulp');
+var gutil = require('gulp-util');
 var $ = require('gulp-load-plugins')();
 var del = require('del');
 var runSequence = require('run-sequence');
@@ -79,9 +80,9 @@ var optimizeHtmlTask = function(src, dest) {
   return gulp.src(src)
     .pipe(assets)
     // Concatenate and minify JavaScript
-    .pipe($.if('*.js', $.uglify({
-      preserveComments: 'some'
-    })))
+    .pipe($.if(['!*.min.js','*.js'], $.uglify({
+      preserveComments: 'license'
+    }).on('error', gutil.log)))
     // Concatenate and minify styles
     // In case you are still using useref build blocks
     .pipe($.if('*.css', $.minifyCss()))
@@ -136,11 +137,27 @@ gulp.task('copy', function() {
 
   // Copy over only the bower_components we need
   // These are things which cannot be vulcanized
+  var bowerFolders = [
+    'webcomponentsjs',
+    'platinum-sw',
+    'sw-toolbox',
+    'promise-polyfill'
+  ].join(',');
   var bower = gulp.src([
-    'app/bower_components/{webcomponentsjs,platinum-sw,sw-toolbox,promise-polyfill}/**/*'
+    'app/bower_components/{' + bowerFolders + '}/**/*'
   ]).pipe(gulp.dest(dist('bower_components')));
 
-  return merge(app, bower)
+  // Copy over only the node modules we need
+  // These are things which cannot be vulcanized
+  var nodeFolders = [
+    'nop',
+    'nop' // just a filler so that {} works
+  ].join(',');
+  var node_modules = gulp.src([
+    'node_modules/{' + nodeFolders + '}/**/*'
+  ]).pipe(gulp.dest(dist('node_modules')));
+
+  return merge(app, bower, node_modules)
     .pipe($.size({
       title: 'copy'
     }));
@@ -157,8 +174,14 @@ gulp.task('fonts', function() {
 
 // Scan your HTML for assets & optimize them
 gulp.task('html', function() {
+  var excludedFolders = [
+    'elements',
+    'test',
+    'bower_components',
+    'node_modules'
+  ].join(',');
   return optimizeHtmlTask(
-    ['dist/**/*.html', '!dist/{elements,test,bower_components}/**/*.html'],
+    ['dist/**/*.html', '!dist/{' + excludedFolders + '}/**/*.html'],
     dist());
 });
 
@@ -233,7 +256,10 @@ gulp.task('serve', ['styles', 'js'], function() {
     //       will present a certificate warning in the browser.
     // https: true,
     server: {
-      baseDir: ['.tmp', 'app'],
+      baseDir: ['.tmp', 'app', 'node_modules'],
+      routes: {
+        '/node_modules': 'node_modules'
+      },
       middleware: [historyApiFallback()]
     }
   });
@@ -319,7 +345,9 @@ gulp.task('js-rollup', function() {
    .pipe($.rollup({
       entry: 'app/scripts/app.js',
       // sourceMap: true,
-      plugins: [babel()],
+      plugins: [babel({
+        presets: ['es2015-rollup'],
+      })],
       format: 'umd',
       moduleName: 'app'
    }))
@@ -330,7 +358,11 @@ gulp.task('js-rollup', function() {
 
 // Transpile all JS to ES5.
 gulp.task('js-babel', function() {
-  return gulp.src(['app/**/*.{js,html}', '!app/scripts/**/*.js', '!app/bower_components/**/*'])
+  return gulp.src([
+      'app/**/*.{js,html}',
+      '!app/scripts/**/*.js',
+      '!app/bower_components/**/*'
+    ])
    .pipe($.sourcemaps.init())
    .pipe($.if('*.html', $.crisper({scriptInHead: false}))) // Extract JS from .html files
    .pipe($.if('*.js', $.babel({
@@ -343,6 +375,6 @@ gulp.task('js-babel', function() {
 
 // Copy all bower_components over to help js task and vulcanize work together
 gulp.task('bowertotmp', function() {
-return gulp.src(['app/bower_components/**/*'])
-  .pipe(gulp.dest('.tmp/bower_components/'));
+  return gulp.src(['app/bower_components/**/*'])
+    .pipe(gulp.dest('.tmp/bower_components/'));
 });
